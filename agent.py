@@ -15,7 +15,7 @@ from rich.markdown import Markdown
 import config
 from context_manager import ContextManager
 from doc_readers import list_projects, list_files, read_docx, read_excel, search_in_file
-from doc_writers import modify_docx_paragraph, modify_excel_cell
+from doc_writers import modify_docx_paragraph, modify_excel_cell, normalize_docx_style
 
 console = Console()
 
@@ -115,6 +115,27 @@ TOOLS = [
     },
     {
         "type": "function",
+        "name": "normalize_docx_style",
+        "description": (
+            "统一 docx 文档的文字格式：清除所有 run 级别的格式覆盖（粗体、红色、斜体、下划线、高亮等），"
+            "让文字统一继承段落样式。可指定段落范围，不指定则处理全文。修改前自动备份。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "docx 文件名"},
+                "paragraph_indices": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "要处理的段落索引列表（来自 read_docx 的编号）。留空则处理全文所有段落。",
+                },
+            },
+            "required": ["project_name", "filename"],
+        },
+    },
+    {
+        "type": "function",
         "name": "modify_excel_cell",
         "description": "修改 xlsx 文件中指定单元格的值，修改前自动备份。注意：.xls 格式只读。",
         "parameters": {
@@ -162,6 +183,11 @@ TOOL_MAP = {
         args["filename"],
         int(args["paragraph_index"]),
         args["new_text"],
+    ),
+    "normalize_docx_style": lambda args: normalize_docx_style(
+        args["project_name"],
+        args["filename"],
+        args.get("paragraph_indices") or None,
     ),
     "modify_excel_cell": lambda args: modify_excel_cell(
         args["project_name"],

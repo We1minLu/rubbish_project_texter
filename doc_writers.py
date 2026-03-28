@@ -95,6 +95,86 @@ def modify_docx_paragraph(
 
 
 # ---------------------------------------------------------------------------
+# normalize_docx_style
+# ---------------------------------------------------------------------------
+
+def normalize_docx_style(
+    project_name: str,
+    filename: str,
+    paragraph_indices: list | None = None,
+) -> str:
+    """清除段落 run 级别的格式覆盖（粗体/颜色/斜体/下划线/高亮等），统一继承段落样式。"""
+    try:
+        from docx import Document
+        from docx.oxml.ns import qn
+    except ImportError:
+        return json.dumps({"error": "python-docx 未安装"}, ensure_ascii=False)
+
+    path = _resolve(project_name, filename)
+    if not path.exists():
+        return json.dumps({"error": f"文件不存在: {filename}"}, ensure_ascii=False)
+
+    try:
+        doc = Document(str(path))
+    except Exception as e:
+        return json.dumps({"error": f"无法打开文档: {e}"}, ensure_ascii=False)
+
+    paragraphs = doc.paragraphs
+    total = len(paragraphs)
+    indices = paragraph_indices if paragraph_indices else list(range(total))
+
+    invalid = [i for i in indices if i < 0 or i >= total]
+    if invalid:
+        return json.dumps(
+            {"error": f"段落索引超出范围 [0, {total - 1}]: {invalid}"},
+            ensure_ascii=False,
+        )
+
+    # XML 标签：需要从 run 的 rPr 中移除的格式元素
+    _REMOVE_TAGS = [
+        qn("w:color"),      # 字体颜色
+        qn("w:highlight"),  # 高亮背景色
+        qn("w:strike"),     # 单删除线
+        qn("w:dstrike"),    # 双删除线
+        qn("w:vertAlign"),  # 上标/下标
+        qn("w:shd"),        # 字符底纹
+    ]
+
+    runs_cleared = 0
+    for idx in indices:
+        para = paragraphs[idx]
+        for run in para.runs:
+            # 清除布尔格式：设为 None 表示继承段落样式
+            run.bold = None
+            run.italic = None
+            run.underline = None
+
+            # 清除 XML 级别的颜色/高亮等属性
+            rPr = run._r.find(qn("w:rPr"))
+            if rPr is not None:
+                for tag in _REMOVE_TAGS:
+                    for el in rPr.findall(tag):
+                        rPr.remove(el)
+
+            runs_cleared += 1
+
+    _ensure_writable(path)
+    backup_path = _backup(path)
+    doc.save(str(path))
+
+    return json.dumps(
+        {
+            "status": "success",
+            "filename": filename,
+            "paragraphs_normalized": len(indices),
+            "runs_cleared": runs_cleared,
+            "backup": backup_path.name,
+        },
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
 # modify_excel_cell
 # ---------------------------------------------------------------------------
 
