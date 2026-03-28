@@ -20,6 +20,63 @@ def _resolve(project_name: str, filename: str) -> Path:
     return path
 
 
+def _apply_default_format(doc) -> dict:
+    """
+    对全文应用默认格式规范（永久启用）：
+      1. 所有段落左对齐
+      2. 1.5 倍行距，段前段后 0 行
+      3. 合并连续空白段落（最多保留1个）
+      4. 清除 run 文本中残留的 ** 标记
+    返回统计信息字典。
+    """
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    stats = {"aligned": 0, "spacing_set": 0, "blank_removed": 0, "asterisk_cleaned": 0}
+
+    # --- 1 & 2 & 4：遍历段落，设对齐/行距/清除 ** ---
+    for para in doc.paragraphs:
+        # 左对齐（None 表示继承样式，也统一显式设为 LEFT）
+        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        stats["aligned"] += 1
+
+        # 行距：1.5倍（240 twips × 1.5 = 360），段前段后 0
+        pPr = para._p.get_or_add_pPr()
+        spacing = pPr.find(qn("w:spacing"))
+        if spacing is None:
+            spacing = OxmlElement("w:spacing")
+            pPr.append(spacing)
+        spacing.set(qn("w:line"), "360")
+        spacing.set(qn("w:lineRule"), "auto")
+        spacing.set(qn("w:before"), "0")
+        spacing.set(qn("w:after"), "0")
+        stats["spacing_set"] += 1
+
+        # 清除 ** 标记
+        for run in para.runs:
+            if "**" in run.text:
+                run.text = run.text.replace("**", "")
+                stats["asterisk_cleaned"] += 1
+
+    # --- 3：移除连续空白段落 ---
+    # doc.paragraphs 每次访问都从 XML 重新读取，所以删除后需重新获取列表
+    while True:
+        paras = doc.paragraphs
+        removed = False
+        for i in range(len(paras) - 1):
+            if not paras[i].text.strip() and not paras[i + 1].text.strip():
+                el = paras[i + 1]._element
+                el.getparent().remove(el)
+                stats["blank_removed"] += 1
+                removed = True
+                break  # 列表已变，重新扫描
+        if not removed:
+            break
+
+    return stats
+
+
 def _ensure_writable(path: Path) -> None:
     """若文件为只读，先去掉只读属性。"""
     current = os.stat(str(path)).st_mode
@@ -77,6 +134,7 @@ def modify_docx_paragraph(
     else:
         para.add_run(new_text)
 
+    _apply_default_format(doc)
     _ensure_writable(path)
     backup_path = _backup(path)
     doc.save(str(path))
@@ -190,6 +248,7 @@ def normalize_docx_style(
 
             runs_cleared += 1
 
+    _apply_default_format(doc)
     _ensure_writable(path)
     backup_path = _backup(path)
     doc.save(str(path))
@@ -286,6 +345,7 @@ def set_docx_font_style(
 
             runs_modified += 1
 
+    _apply_default_format(doc)
     _ensure_writable(path)
     backup_path = _backup(path)
     doc.save(str(path))
