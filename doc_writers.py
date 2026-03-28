@@ -94,6 +94,38 @@ def modify_docx_paragraph(
     )
 
 
+# 中文字号 → 磅值对照表
+_FONT_SIZE_MAP: dict[str, float] = {
+    "初号": 42, "小初": 36, "一号": 26, "小一": 24,
+    "二号": 22, "小二": 18, "三号": 16, "小三": 15,
+    "四号": 14, "小四": 12, "五号": 10.5, "小五": 9,
+    "六号": 7.5, "小六": 6.5, "七号": 5.5, "八号": 5,
+}
+
+# style_filter="body" 匹配的段落样式名
+_BODY_STYLES = {"Normal", "正文", "Body Text", "Body Text 2", "Body Text 3",
+                "Default Paragraph Style", "Text Body"}
+
+
+def _is_heading(style_name: str) -> bool:
+    return style_name.startswith("Heading") or style_name.startswith("标题")
+
+
+def _is_body(style_name: str) -> bool:
+    return style_name in _BODY_STYLES or style_name.startswith("Normal")
+
+
+def _parse_pt(font_size: str) -> float | None:
+    """将字号字符串解析为磅值，失败返回 None。"""
+    s = font_size.strip()
+    if s in _FONT_SIZE_MAP:
+        return _FONT_SIZE_MAP[s]
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # normalize_docx_style
 # ---------------------------------------------------------------------------
@@ -168,6 +200,103 @@ def normalize_docx_style(
             "filename": filename,
             "paragraphs_normalized": len(indices),
             "runs_cleared": runs_cleared,
+            "backup": backup_path.name,
+        },
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# set_docx_font_style
+# ---------------------------------------------------------------------------
+
+def set_docx_font_style(
+    project_name: str,
+    filename: str,
+    font_name: str | None = None,
+    font_size: str | None = None,
+    bold: bool | None = None,
+    style_filter: str = "all",
+    paragraph_indices: list | None = None,
+) -> str:
+    """对 docx 段落设置字体名称、字号、粗体。支持全文/标题/正文/指定段落四种范围。"""
+    try:
+        from docx import Document
+        from docx.shared import Pt
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+    except ImportError:
+        return json.dumps({"error": "python-docx 未安装"}, ensure_ascii=False)
+
+    if font_name is None and font_size is None and bold is None:
+        return json.dumps({"error": "至少需要指定 font_name、font_size、bold 其中一项"}, ensure_ascii=False)
+
+    pt_size: float | None = None
+    if font_size is not None:
+        pt_size = _parse_pt(font_size)
+        if pt_size is None:
+            return json.dumps({"error": f"无法识别字号: {font_size}，支持如 小四、四号、12、14"}, ensure_ascii=False)
+
+    path = _resolve(project_name, filename)
+    if not path.exists():
+        return json.dumps({"error": f"文件不存在: {filename}"}, ensure_ascii=False)
+
+    try:
+        doc = Document(str(path))
+    except Exception as e:
+        return json.dumps({"error": f"无法打开文档: {e}"}, ensure_ascii=False)
+
+    paragraphs = doc.paragraphs
+    total = len(paragraphs)
+
+    # 确定要处理的段落索引
+    if paragraph_indices is not None:
+        invalid = [i for i in paragraph_indices if i < 0 or i >= total]
+        if invalid:
+            return json.dumps({"error": f"段落索引超出范围 [0,{total-1}]: {invalid}"}, ensure_ascii=False)
+        target_indices = paragraph_indices
+    else:
+        if style_filter == "heading":
+            target_indices = [i for i, p in enumerate(paragraphs) if _is_heading(p.style.name)]
+        elif style_filter == "body":
+            target_indices = [i for i, p in enumerate(paragraphs) if _is_body(p.style.name)]
+        else:
+            target_indices = list(range(total))
+
+    runs_modified = 0
+    for idx in target_indices:
+        para = paragraphs[idx]
+        for run in para.runs:
+            if bold is not None:
+                run.bold = bold
+
+            if pt_size is not None:
+                run.font.size = Pt(pt_size)
+
+            if font_name is not None:
+                # ASCII 字体
+                run.font.name = font_name
+                # 中文字体（East Asian）：必须通过 XML 设置，否则中文字符不生效
+                rPr = run._r.get_or_add_rPr()
+                rFonts = rPr.find(qn("w:rFonts"))
+                if rFonts is None:
+                    rFonts = OxmlElement("w:rFonts")
+                    rPr.insert(0, rFonts)
+                rFonts.set(qn("w:eastAsia"), font_name)
+
+            runs_modified += 1
+
+    _ensure_writable(path)
+    backup_path = _backup(path)
+    doc.save(str(path))
+
+    return json.dumps(
+        {
+            "status": "success",
+            "filename": filename,
+            "style_filter": style_filter if paragraph_indices is None else "指定段落",
+            "paragraphs_modified": len(target_indices),
+            "runs_modified": runs_modified,
             "backup": backup_path.name,
         },
         ensure_ascii=False,

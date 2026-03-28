@@ -15,7 +15,7 @@ from rich.markdown import Markdown
 import config
 from context_manager import ContextManager
 from doc_readers import list_projects, list_files, read_docx, read_excel, search_in_file
-from doc_writers import modify_docx_paragraph, modify_excel_cell, normalize_docx_style
+from doc_writers import modify_docx_paragraph, modify_excel_cell, normalize_docx_style, set_docx_font_style
 
 console = Console()
 
@@ -115,6 +115,36 @@ TOOLS = [
     },
     {
         "type": "function",
+        "name": "set_docx_font_style",
+        "description": (
+            "对 docx 文档设置字体名称、字号、粗体。"
+            "可通过 style_filter 指定作用范围：all=全文，heading=仅标题段落，body=仅正文段落；"
+            "也可通过 paragraph_indices 指定具体段落（优先级更高）。修改前自动备份。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "docx 文件名"},
+                "font_name": {"type": "string", "description": "字体名称，如 宋体、微软雅黑、黑体"},
+                "font_size": {"type": "string", "description": "字号，支持中文名（小四、四号）或数字（12、14）"},
+                "bold": {"type": "boolean", "description": "true=加粗，false=取消加粗"},
+                "style_filter": {
+                    "type": "string",
+                    "enum": ["all", "heading", "body"],
+                    "description": "all=全文所有段落，heading=仅标题段落，body=仅正文段落。默认 all",
+                },
+                "paragraph_indices": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "指定段落索引列表（来自 read_docx 编号），优先级高于 style_filter",
+                },
+            },
+            "required": ["project_name", "filename"],
+        },
+    },
+    {
+        "type": "function",
         "name": "normalize_docx_style",
         "description": (
             "统一 docx 文档的文字格式：清除所有 run 级别的格式覆盖（粗体、红色、斜体、下划线、高亮等），"
@@ -183,6 +213,15 @@ TOOL_MAP = {
         args["filename"],
         int(args["paragraph_index"]),
         args["new_text"],
+    ),
+    "set_docx_font_style": lambda args: set_docx_font_style(
+        args["project_name"],
+        args["filename"],
+        args.get("font_name"),
+        args.get("font_size"),
+        args.get("bold"),
+        args.get("style_filter", "all"),
+        args.get("paragraph_indices") or None,
     ),
     "normalize_docx_style": lambda args: normalize_docx_style(
         args["project_name"],
