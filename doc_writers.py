@@ -59,14 +59,14 @@ def _apply_default_format(doc) -> dict:
                 run.text = run.text.replace("**", "")
                 stats["asterisk_cleaned"] += 1
 
-    # --- 3：移除连续空白段落 ---
+    # --- 3：移除所有空白段落（包括只含空格/制表符的段落）---
     # doc.paragraphs 每次访问都从 XML 重新读取，所以删除后需重新获取列表
     while True:
         paras = doc.paragraphs
         removed = False
-        for i in range(len(paras) - 1):
-            if not paras[i].text.strip() and not paras[i + 1].text.strip():
-                el = paras[i + 1]._element
+        for para in paras:
+            if not para.text.strip():
+                el = para._element
                 el.getparent().remove(el)
                 stats["blank_removed"] += 1
                 removed = True
