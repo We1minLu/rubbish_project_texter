@@ -634,21 +634,39 @@ def insert_images_into_docx(
             else:
                 body.append(elem)
 
+    def _to_supported_bytes(img_data: bytes) -> bytes:
+        """将图片转换为 python-docx 支持的 PNG 格式（处理 WEBP 等不支持格式）。"""
+        try:
+            from PIL import Image as PILImage
+            img = PILImage.open(io.BytesIO(img_data))
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+        except Exception:
+            return img_data  # 转换失败时原样返回，交给 add_picture 处理
+
+    insert_errors = []
     inserted = 0
     for (img_data, mime, caption), pos in zip(images_with_captions, positions):
         ref_p = doc.paragraphs[pos]._p if pos is not None else None
 
-        # — 图片段落 —
-        img_para = doc.add_paragraph()
-        img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        img_run = img_para.add_run()
         try:
-            img_run.add_picture(io.BytesIO(img_data), width=Emu(max_img_width_emu))
-        except Exception:
-            img_run.add_picture(io.BytesIO(img_data))
-        img_el = img_para._p
-        body.remove(img_el)
-        _insert_before(ref_p, img_el)
+            # 转换为 python-docx 支持的格式（解决 WEBP 等格式问题）
+            safe_img_data = _to_supported_bytes(img_data)
+
+            # — 图片段落 —
+            img_para = doc.add_paragraph()
+            img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            img_run = img_para.add_run()
+            img_run.add_picture(io.BytesIO(safe_img_data), width=Emu(max_img_width_emu))
+            img_el = img_para._p
+            body.remove(img_el)
+            _insert_before(ref_p, img_el)
+        except Exception as e:
+            insert_errors.append(f"{caption}: {e}")
+            continue
 
         # — 图题段落 —
         cap_para = doc.add_paragraph()
@@ -668,16 +686,16 @@ def insert_images_into_docx(
     _ensure_writable(target_path)
     doc.save(str(target_path))
 
-    return json.dumps(
-        {
-            "status": "success",
-            "target": target_filename,
-            "images_inserted": inserted,
-            "mode": mode,
-            "captions": [c for _, _, c in images_with_captions],
-        },
-        ensure_ascii=False,
-    )
+    result = {
+        "status": "success",
+        "target": target_filename,
+        "images_inserted": inserted,
+        "mode": mode,
+        "captions": [c for _, _, c in images_with_captions],
+    }
+    if insert_errors:
+        result["warnings"] = insert_errors
+    return json.dumps(result, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
