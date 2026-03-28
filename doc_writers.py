@@ -142,7 +142,6 @@ def modify_docx_paragraph(
 
     _apply_default_format(doc)
     _ensure_writable(path)
-    backup_path = _backup(path)
     doc.save(str(path))
 
     return json.dumps(
@@ -152,7 +151,6 @@ def modify_docx_paragraph(
             "paragraph_index": paragraph_index,
             "old_value": old_text,
             "new_value": new_text,
-            "backup": backup_path.name,
         },
         ensure_ascii=False,
     )
@@ -256,7 +254,6 @@ def normalize_docx_style(
 
     _apply_default_format(doc)
     _ensure_writable(path)
-    backup_path = _backup(path)
     doc.save(str(path))
 
     return json.dumps(
@@ -265,7 +262,6 @@ def normalize_docx_style(
             "filename": filename,
             "paragraphs_normalized": len(indices),
             "runs_cleared": runs_cleared,
-            "backup": backup_path.name,
         },
         ensure_ascii=False,
     )
@@ -353,7 +349,6 @@ def set_docx_font_style(
 
     _apply_default_format(doc)
     _ensure_writable(path)
-    backup_path = _backup(path)
     doc.save(str(path))
 
     return json.dumps(
@@ -363,7 +358,6 @@ def set_docx_font_style(
             "style_filter": style_filter if paragraph_indices is None else "指定段落",
             "paragraphs_modified": len(target_indices),
             "runs_modified": runs_modified,
-            "backup": backup_path.name,
         },
         ensure_ascii=False,
     )
@@ -419,7 +413,6 @@ def modify_excel_cell(
         return json.dumps({"error": f"单元格操作失败: {e}"}, ensure_ascii=False)
 
     _ensure_writable(path)
-    backup_path = _backup(path)
     wb.save(str(path))
 
     return json.dumps(
@@ -430,7 +423,6 @@ def modify_excel_cell(
             "cell": cell_address,
             "old_value": str(old_value) if old_value is not None else "",
             "new_value": new_value,
-            "backup": backup_path.name,
         },
         ensure_ascii=False,
     )
