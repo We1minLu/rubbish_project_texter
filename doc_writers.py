@@ -59,6 +59,12 @@ def _apply_default_format(doc) -> dict:
                 run.text = run.text.replace("**", "")
                 stats["asterisk_cleaned"] += 1
 
+        # 移除段落内的 <w:br/> 换行符（AI 常用 \n\n 模拟段落间距，产生空白行）
+        for br in para._p.findall(".//" + qn("w:br")):
+            br.getparent().remove(br)
+            stats.setdefault("br_removed", 0)
+            stats["br_removed"] += 1
+
     # --- 3：移除所有空白段落（包括只含空格/制表符的段落）---
     # doc.paragraphs 每次访问都从 XML 重新读取，所以删除后需重新获取列表
     while True:
