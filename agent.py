@@ -15,7 +15,7 @@ from rich.markdown import Markdown
 import config
 from context_manager import ContextManager
 from doc_readers import list_projects, list_files, read_docx, read_excel, search_in_file, read_image, read_pdf, read_pptx, read_project_folder
-from doc_writers import modify_docx_paragraph, modify_excel_cell, normalize_docx_style, set_docx_font_style, restructure_docx_paragraphs
+from doc_writers import modify_docx_paragraph, modify_excel_cell, normalize_docx_style, set_docx_font_style, restructure_docx_paragraphs, insert_images_into_docx
 
 console = Console()
 
@@ -276,6 +276,47 @@ TOOLS = [
     },
     {
         "type": "function",
+        "name": "insert_images_into_docx",
+        "description": (
+            "从图片来源（子文件夹 或 含图片的 docx 文件）提取所有图片，"
+            "调用视觉AI理解图片内容并生成图名，"
+            "随机分散或追加插入到目标 docx 文档中，"
+            "每张图下方附居中图题（如'图 1  示意图'）。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "source": {
+                    "type": "string",
+                    "description": "图片来源：子文件夹名称（如 '配图'）或含嵌入图片的 docx 文件名（如 '配图.docx'）",
+                },
+                "target_filename": {
+                    "type": "string",
+                    "description": "要插入图片的目标 docx 文件名，如 '1.docx'",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["random", "append"],
+                    "description": "random=随机分散插入正文中，append=全部追加到文末，默认 random",
+                    "default": "random",
+                },
+                "caption_prefix": {
+                    "type": "string",
+                    "description": "图题前缀，默认为'图'，生成如'图 1  内容描述'",
+                    "default": "图",
+                },
+                "max_width_cm": {
+                    "type": "number",
+                    "description": "图片最大宽度（厘米），默认12，A4页面建议不超过14",
+                    "default": 12.0,
+                },
+            },
+            "required": ["project_name", "source", "target_filename"],
+        },
+    },
+    {
+        "type": "function",
         "name": "modify_excel_cell",
         "description": "修改 xlsx 文件中指定单元格的值，修改前自动备份。注意：.xls 格式只读。",
         "parameters": {
@@ -357,6 +398,14 @@ TOOL_MAP = {
         args["project_name"],
         args["filename"],
         args.get("paragraph_indices") or None,
+    ),
+    "insert_images_into_docx": lambda args: insert_images_into_docx(
+        args["project_name"],
+        args["source"],
+        args["target_filename"],
+        args.get("mode", "random"),
+        args.get("caption_prefix", "图"),
+        float(args.get("max_width_cm", 12.0)),
     ),
     "modify_excel_cell": lambda args: modify_excel_cell(
         args["project_name"],

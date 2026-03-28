@@ -1,14 +1,17 @@
 """文档修改模块：docx 段落修改 + xlsx 单元格修改 + 自动备份。"""
 from __future__ import annotations
+import base64
 import io
 import json
 import os
+import random
 import shutil
 import stat
 from datetime import datetime
 from pathlib import Path
 
 from config import PROJECTS_DIR
+import config
 
 
 def _resolve(project_name: str, filename: str) -> Path:
@@ -37,9 +40,12 @@ def _apply_default_format(doc) -> dict:
 
     # --- 1 & 2 & 4：遍历段落，设对齐/行距/清除 ** ---
     for para in doc.paragraphs:
-        # 左对齐（None 表示继承样式，也统一显式设为 LEFT）
-        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        stats["aligned"] += 1
+        # 图片段落（含 w:drawing）和图题段落不强制左对齐，保留居中
+        has_drawing = bool(para._p.findall('.//' + qn('w:drawing')))
+        is_caption = para.style.name in ("Caption", "图题", "图注")
+        if not has_drawing and not is_caption:
+            para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            stats["aligned"] += 1
 
         # 行距：1.5倍（240 twips × 1.5 = 360），段前段后 0
         pPr = para._p.get_or_add_pPr()
@@ -66,12 +72,14 @@ def _apply_default_format(doc) -> dict:
             stats["br_removed"] += 1
 
     # --- 3：移除所有空白段落（包括只含空格/制表符的段落）---
-    # doc.paragraphs 每次访问都从 XML 重新读取，所以删除后需重新获取列表
+    # 注意：图片段落 text 为空但不应删除，需先检查是否含 w:drawing
     while True:
         paras = doc.paragraphs
         removed = False
         for para in paras:
             if not para.text.strip():
+                if para._p.findall('.//' + qn('w:drawing')):
+                    continue  # 图片段落，跳过
                 el = para._element
                 el.getparent().remove(el)
                 stats["blank_removed"] += 1
@@ -464,6 +472,172 @@ def restructure_docx_paragraphs(
             "status": "success",
             "filename": filename,
             "paragraphs_restructured": modified,
+        },
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# insert_images_into_docx
+# ---------------------------------------------------------------------------
+
+def insert_images_into_docx(
+    project_name: str,
+    source: str,
+    target_filename: str,
+    mode: str = "random",
+    caption_prefix: str = "图",
+    max_width_cm: float = 12.0,
+) -> str:
+    """
+    从 source（子文件夹 或 含图片的 docx 文件）提取图片，
+    调用视觉 AI 生成图名，随机或追加插入 target_filename，
+    每张图下方附居中图题（如"图 1  示意图"）。
+    """
+    try:
+        from docx import Document
+        from docx.shared import Cm, Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml.ns import qn
+    except ImportError:
+        return json.dumps({"error": "python-docx 未安装"}, ensure_ascii=False)
+
+    # ---- 1. 收集图片 (bytes, content_type, display_name) ----
+    IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif"}
+    MIME_MAP = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".bmp": "image/bmp", ".webp": "image/webp", ".gif": "image/gif",
+    }
+
+    source_path = (PROJECTS_DIR / project_name / source).resolve()
+
+    raw_images: list[tuple[bytes, str, str]] = []  # (data, mime, display_name)
+
+    if source_path.is_dir():
+        for f in sorted(source_path.iterdir()):
+            if f.is_file() and f.suffix.lower() in IMAGE_EXTS:
+                raw_images.append((f.read_bytes(), MIME_MAP[f.suffix.lower()], f.name))
+    elif source_path.exists() and source_path.suffix.lower() == ".docx":
+        try:
+            with open(str(source_path), "rb") as _f:
+                src_doc = Document(io.BytesIO(_f.read()))
+            seen = set()
+            for rId, rel in src_doc.part.rels.items():
+                if "/image" in rel.reltype and rId not in seen:
+                    seen.add(rId)
+                    part = rel.target_part
+                    ct = part.content_type  # e.g. image/jpeg
+                    raw_images.append((part.blob, ct, rId))
+        except Exception as e:
+            return json.dumps({"error": f"无法提取 docx 中的图片: {e}"}, ensure_ascii=False)
+    else:
+        return json.dumps({"error": f"source 不存在或不支持: {source}"}, ensure_ascii=False)
+
+    if not raw_images:
+        return json.dumps({"error": "未在 source 中找到图片"}, ensure_ascii=False)
+
+    # ---- 2. 调用视觉 AI 生成图名 ----
+    from openai import OpenAI
+    vision_client = OpenAI(api_key=config.API_KEY, base_url=config.BASE_URL)
+
+    images_with_captions: list[tuple[bytes, str, str]] = []  # (data, mime, caption_text)
+    for idx, (img_data, mime, display_name) in enumerate(raw_images):
+        b64 = base64.b64encode(img_data).decode()
+        data_url = f"data:{mime};base64,{b64}"
+        try:
+            resp = vision_client.chat.completions.create(
+                model=config.IMAGE_MODEL,
+                messages=[{"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "text", "text": "请用不超过15个中文字简洁描述这张图片的主要内容，仅输出描述文字，不加标点"},
+                ]}],
+                temperature=0.3,
+            )
+            desc = (resp.choices[0].message.content or display_name).strip()
+        except Exception:
+            desc = display_name
+        caption = f"{caption_prefix} {idx + 1}  {desc}"
+        images_with_captions.append((img_data, mime, caption))
+
+    # ---- 3. 打开目标文档 ----
+    target_path = _resolve(project_name, target_filename)
+    if not target_path.exists():
+        return json.dumps({"error": f"目标文件不存在: {target_filename}"}, ensure_ascii=False)
+
+    try:
+        with open(str(target_path), "rb") as _f:
+            doc = Document(io.BytesIO(_f.read()))
+    except Exception as e:
+        return json.dumps({"error": f"无法打开目标文档: {e}"}, ensure_ascii=False)
+
+    body = doc.element.body
+
+    # ---- 4. 确定插入位置（倒序，避免索引偏移）----
+    num_paras = len(doc.paragraphs)
+    num_images = len(images_with_captions)
+
+    if mode == "random" and num_paras > 0:
+        sample_size = min(num_images, num_paras)
+        positions = sorted(random.sample(range(num_paras), sample_size), reverse=True)
+        # 若图片多于段落，多余的追加到末尾
+        positions += [None] * (num_images - sample_size)
+    else:
+        positions = [None] * num_images  # 全部追加
+
+    # ---- 5. 插入图片 + 图题（倒序保证随机位置稳定）----
+    def _insert_before(ref_p, elem):
+        """将 elem 插入到 ref_p 之前；ref_p 为 None 时追加到 sectPr 前。"""
+        if ref_p is not None:
+            ref_p.addprevious(elem)
+        else:
+            sect_pr = body.find(qn("w:sectPr"))
+            if sect_pr is not None:
+                sect_pr.addprevious(elem)
+            else:
+                body.append(elem)
+
+    inserted = 0
+    for (img_data, mime, caption), pos in zip(images_with_captions, positions):
+        ref_p = doc.paragraphs[pos]._p if pos is not None else None
+
+        # — 图片段落 —
+        img_para = doc.add_paragraph()
+        img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        img_run = img_para.add_run()
+        try:
+            img_run.add_picture(io.BytesIO(img_data), width=Cm(max_width_cm))
+        except Exception:
+            # 图片尺寸异常时不限宽
+            img_run.add_picture(io.BytesIO(img_data))
+        img_el = img_para._p
+        body.remove(img_el)
+        _insert_before(ref_p, img_el)
+
+        # — 图题段落 —
+        cap_para = doc.add_paragraph()
+        cap_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        try:
+            cap_para.style = doc.styles["Caption"]
+        except KeyError:
+            pass  # 无 Caption 样式时保持默认
+        cap_run = cap_para.add_run(caption)
+        cap_run.font.size = Pt(10.5)  # 五号
+        cap_el = cap_para._p
+        body.remove(cap_el)
+        _insert_before(ref_p, cap_el)
+
+        inserted += 1
+
+    _ensure_writable(target_path)
+    doc.save(str(target_path))
+
+    return json.dumps(
+        {
+            "status": "success",
+            "target": target_filename,
+            "images_inserted": inserted,
+            "mode": mode,
+            "captions": [c for _, _, c in images_with_captions],
         },
         ensure_ascii=False,
     )
