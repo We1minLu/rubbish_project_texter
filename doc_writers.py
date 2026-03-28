@@ -117,7 +117,8 @@ def modify_docx_paragraph(
         return json.dumps({"error": f"文件不存在: {filename}"}, ensure_ascii=False)
 
     try:
-        doc = Document(str(path))
+        with open(str(path), "rb") as _f:
+            doc = Document(io.BytesIO(_f.read()))
     except Exception as e:
         return json.dumps({"error": f"无法打开文档: {e}"}, ensure_ascii=False)
 
@@ -209,7 +210,8 @@ def normalize_docx_style(
         return json.dumps({"error": f"文件不存在: {filename}"}, ensure_ascii=False)
 
     try:
-        doc = Document(str(path))
+        with open(str(path), "rb") as _f:
+            doc = Document(io.BytesIO(_f.read()))
     except Exception as e:
         return json.dumps({"error": f"无法打开文档: {e}"}, ensure_ascii=False)
 
@@ -303,7 +305,8 @@ def set_docx_font_style(
         return json.dumps({"error": f"文件不存在: {filename}"}, ensure_ascii=False)
 
     try:
-        doc = Document(str(path))
+        with open(str(path), "rb") as _f:
+            doc = Document(io.BytesIO(_f.read()))
     except Exception as e:
         return json.dumps({"error": f"无法打开文档: {e}"}, ensure_ascii=False)
 
@@ -358,6 +361,109 @@ def set_docx_font_style(
             "style_filter": style_filter if paragraph_indices is None else "指定段落",
             "paragraphs_modified": len(target_indices),
             "runs_modified": runs_modified,
+        },
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# restructure_docx_paragraphs
+# ---------------------------------------------------------------------------
+
+# 样式配置：style_key → Word样式名 + 字体参数 + 缩进
+_STRUCTURE_CONFIG = {
+    "heading1": {"style": "Heading 1", "pt": 14, "bold": True,  "first_line_twips": 0},
+    "heading2": {"style": "Heading 2", "pt": 12, "bold": True,  "first_line_twips": 0},
+    "heading3": {"style": "Heading 3", "pt": 12, "bold": False, "first_line_twips": 0},
+    "body":     {"style": "Normal",    "pt": 12, "bold": False, "first_line_twips": 480},  # 2字符×12pt×20twips
+}
+
+
+def restructure_docx_paragraphs(
+    project_name: str,
+    filename: str,
+    paragraph_styles: dict,
+) -> str:
+    """
+    批量重构段落结构。paragraph_styles 为 {段落索引: style_key} 映射，
+    style_key 取值：heading1 / heading2 / heading3 / body。
+    - 标题：使用 Word 标准 Heading 样式（支持生成目录），顶格无缩进
+    - 正文：Normal 样式，首行缩进2字符
+    """
+    try:
+        from docx import Document
+        from docx.shared import Pt
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+    except ImportError:
+        return json.dumps({"error": "python-docx 未安装"}, ensure_ascii=False)
+
+    path = _resolve(project_name, filename)
+    if not path.exists():
+        return json.dumps({"error": f"文件不存在: {filename}"}, ensure_ascii=False)
+
+    try:
+        with open(str(path), "rb") as _f:
+            doc = Document(io.BytesIO(_f.read()))
+    except Exception as e:
+        return json.dumps({"error": f"无法打开文档: {e}"}, ensure_ascii=False)
+
+    paragraphs = doc.paragraphs
+    total = len(paragraphs)
+    modified = 0
+
+    for idx_raw, style_key in paragraph_styles.items():
+        idx = int(idx_raw)
+        if idx < 0 or idx >= total:
+            continue
+        cfg = _STRUCTURE_CONFIG.get(str(style_key).lower())
+        if cfg is None:
+            continue
+
+        para = paragraphs[idx]
+
+        # 1. 设置 Word 段落样式（TOC 识别依赖此处）
+        try:
+            para.style = doc.styles[cfg["style"]]
+        except KeyError:
+            pass  # 文档中无此样式时跳过，不影响其他格式
+
+        # 2. run 级别字体：宋体 + 字号 + 粗体
+        for run in para.runs:
+            run.font.name = "宋体"
+            run.font.size = Pt(cfg["pt"])
+            run.bold = cfg["bold"]
+            # 中文字体需额外设置 eastAsia，否则汉字不生效
+            rPr = run._r.get_or_add_rPr()
+            rFonts = rPr.find(qn("w:rFonts"))
+            if rFonts is None:
+                rFonts = OxmlElement("w:rFonts")
+                rPr.insert(0, rFonts)
+            rFonts.set(qn("w:eastAsia"), "宋体")
+
+        # 3. 段落缩进
+        pPr = para._p.get_or_add_pPr()
+        ind = pPr.find(qn("w:ind"))
+        if ind is None:
+            ind = OxmlElement("w:ind")
+            pPr.append(ind)
+        ind.set(qn("w:left"), "0")
+        if cfg["first_line_twips"] > 0:
+            ind.set(qn("w:firstLine"), str(cfg["first_line_twips"]))
+        else:
+            ind.set(qn("w:firstLine"), "0")
+
+        modified += 1
+
+    _apply_default_format(doc)
+    _ensure_writable(path)
+    doc.save(str(path))
+
+    return json.dumps(
+        {
+            "status": "success",
+            "filename": filename,
+            "paragraphs_restructured": modified,
         },
         ensure_ascii=False,
     )

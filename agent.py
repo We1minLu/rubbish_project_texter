@@ -15,7 +15,7 @@ from rich.markdown import Markdown
 import config
 from context_manager import ContextManager
 from doc_readers import list_projects, list_files, read_docx, read_excel, search_in_file
-from doc_writers import modify_docx_paragraph, modify_excel_cell, normalize_docx_style, set_docx_font_style
+from doc_writers import modify_docx_paragraph, modify_excel_cell, normalize_docx_style, set_docx_font_style, restructure_docx_paragraphs
 
 console = Console()
 
@@ -111,6 +111,32 @@ TOOLS = [
                 "new_text": {"type": "string", "description": "新的段落文本"},
             },
             "required": ["project_name", "filename", "paragraph_index", "new_text"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "restructure_docx_paragraphs",
+        "description": (
+            "批量重构 docx 文档的段落结构：为每个段落指定 heading1/heading2/heading3/body，"
+            "设置对应的 Word 标准样式（Heading 1/2/3 / Normal），支持 Word 自动生成目录。"
+            "标题顶格无缩进，正文首行缩进2字符。"
+            "使用前必须先用 read_docx 读完全文，再根据内容判断每段的层级后一次性调用本工具。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "docx 文件名"},
+                "paragraph_styles": {
+                    "type": "object",
+                    "description": (
+                        "段落索引 → 样式的映射，键为段落索引字符串，值为 heading1/heading2/heading3/body。"
+                        "例：{\"0\": \"heading1\", \"1\": \"body\", \"2\": \"heading2\"}"
+                    ),
+                    "additionalProperties": {"type": "string", "enum": ["heading1", "heading2", "heading3", "body"]},
+                },
+            },
+            "required": ["project_name", "filename", "paragraph_styles"],
         },
     },
     {
@@ -213,6 +239,11 @@ TOOL_MAP = {
         args["filename"],
         int(args["paragraph_index"]),
         args["new_text"],
+    ),
+    "restructure_docx_paragraphs": lambda args: restructure_docx_paragraphs(
+        args["project_name"],
+        args["filename"],
+        args["paragraph_styles"],
     ),
     "set_docx_font_style": lambda args: set_docx_font_style(
         args["project_name"],
