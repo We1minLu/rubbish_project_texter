@@ -214,8 +214,9 @@ def _build_input(history: list) -> list:
         elif role == "assistant":
             content = entry.get("content", "")
             if content:
-                # assistant 历史消息需要 status: completed
+                # assistant 历史消息需要 type: message + status: completed
                 items.append({
+                    "type": "message",
                     "role": "assistant",
                     "content": [{"type": "output_text", "text": content}],
                     "status": "completed",
