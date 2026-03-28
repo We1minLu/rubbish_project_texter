@@ -282,6 +282,7 @@ TOOLS = [
             "调用视觉AI理解图片内容并生成图名，"
             "随机分散或追加插入到目标 docx 文档中，"
             "每张图下方附居中图题（如'图 1  示意图'）。"
+            "图片宽度自动限制为页面行宽70%，任意两张图之间保证至少55字文本间隔。"
         ),
         "parameters": {
             "type": "object",
@@ -298,18 +299,13 @@ TOOLS = [
                 "mode": {
                     "type": "string",
                     "enum": ["random", "append"],
-                    "description": "random=随机分散插入正文中，append=全部追加到文末，默认 random",
+                    "description": "random=随机分散插入正文中（保证图片间有足够文字），append=全部追加到文末，默认 random",
                     "default": "random",
                 },
                 "caption_prefix": {
                     "type": "string",
                     "description": "图题前缀，默认为'图'，生成如'图 1  内容描述'",
                     "default": "图",
-                },
-                "max_width_cm": {
-                    "type": "number",
-                    "description": "图片最大宽度（厘米），默认12，A4页面建议不超过14",
-                    "default": 12.0,
                 },
             },
             "required": ["project_name", "source", "target_filename"],
@@ -405,7 +401,6 @@ TOOL_MAP = {
         args["target_filename"],
         args.get("mode", "random"),
         args.get("caption_prefix", "图"),
-        float(args.get("max_width_cm", 12.0)),
     ),
     "modify_excel_cell": lambda args: modify_excel_cell(
         args["project_name"],

@@ -481,18 +481,48 @@ def restructure_docx_paragraphs(
 # insert_images_into_docx
 # ---------------------------------------------------------------------------
 
+def _select_positions_with_gap(paragraphs, num_images: int, min_chars: int = 55) -> list[int]:
+    """
+    从段落列表中随机选取 num_images 个插入位置（0-based），
+    保证任意两个选中位置之间的段落文本总字数 >= min_chars。
+    返回按索引从大到小排列的列表（供倒序插入使用）。
+    """
+    n = len(paragraphs)
+    if n == 0:
+        return []
+
+    candidates = list(range(n))
+    random.shuffle(candidates)
+
+    selected: list[int] = []
+    for pos in candidates:
+        if len(selected) >= num_images:
+            break
+        ok = True
+        for sel in selected:
+            lo, hi = min(pos, sel), max(pos, sel)
+            chars_between = sum(len(paragraphs[k].text) for k in range(lo, hi))
+            if chars_between < min_chars:
+                ok = False
+                break
+        if ok:
+            selected.append(pos)
+
+    return sorted(selected, reverse=True)
+
+
 def insert_images_into_docx(
     project_name: str,
     source: str,
     target_filename: str,
     mode: str = "random",
     caption_prefix: str = "图",
-    max_width_cm: float = 12.0,
 ) -> str:
     """
     从 source（子文件夹 或 含图片的 docx 文件）提取图片，
     调用视觉 AI 生成图名，随机或追加插入 target_filename，
     每张图下方附居中图题（如"图 1  示意图"）。
+    图片宽度自动限制为页面行宽的 70%，且任意两张图之间至少有 55 字文本。
     """
     try:
         from docx import Document
@@ -572,19 +602,27 @@ def insert_images_into_docx(
 
     body = doc.element.body
 
-    # ---- 4. 确定插入位置（倒序，避免索引偏移）----
+    # ---- 4. 计算图片最大宽度（行宽 × 70%）----
+    from docx.shared import Emu
+    try:
+        section = doc.sections[0]
+        text_width_emu = section.page_width - section.left_margin - section.right_margin
+        max_img_width_emu = int(text_width_emu * 0.7)
+    except Exception:
+        max_img_width_emu = int(Cm(10.0))  # 回退：10cm
+
+    # ---- 5. 确定插入位置（倒序，避免索引偏移）----
     num_paras = len(doc.paragraphs)
     num_images = len(images_with_captions)
 
     if mode == "random" and num_paras > 0:
-        sample_size = min(num_images, num_paras)
-        positions = sorted(random.sample(range(num_paras), sample_size), reverse=True)
-        # 若图片多于段落，多余的追加到末尾
-        positions += [None] * (num_images - sample_size)
+        positions = _select_positions_with_gap(doc.paragraphs, num_images, min_chars=55)
+        # 若受间距约束导致位置不足，多余图片追加到末尾
+        positions += [None] * (num_images - len(positions))
     else:
         positions = [None] * num_images  # 全部追加
 
-    # ---- 5. 插入图片 + 图题（倒序保证随机位置稳定）----
+    # ---- 6. 插入图片 + 图题（倒序保证随机位置稳定）----
     def _insert_before(ref_p, elem):
         """将 elem 插入到 ref_p 之前；ref_p 为 None 时追加到 sectPr 前。"""
         if ref_p is not None:
@@ -605,9 +643,8 @@ def insert_images_into_docx(
         img_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         img_run = img_para.add_run()
         try:
-            img_run.add_picture(io.BytesIO(img_data), width=Cm(max_width_cm))
+            img_run.add_picture(io.BytesIO(img_data), width=Emu(max_img_width_emu))
         except Exception:
-            # 图片尺寸异常时不限宽
             img_run.add_picture(io.BytesIO(img_data))
         img_el = img_para._p
         body.remove(img_el)
