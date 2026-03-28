@@ -200,8 +200,10 @@ def _build_input(history: list) -> list:
         entry_type = entry.get("type")
         role = entry.get("role")
 
-        if entry_type in ("function_call", "function_call_output"):
-            # 直接透传这两种类型
+        if entry_type == "function_call":
+            # function_call 需要 status: completed
+            items.append({**entry, "status": "completed"})
+        elif entry_type == "function_call_output":
             items.append(entry)
         elif role == "user":
             content = entry.get("content", "")
@@ -212,9 +214,11 @@ def _build_input(history: list) -> list:
         elif role == "assistant":
             content = entry.get("content", "")
             if content:
+                # assistant 历史消息需要 status: completed
                 items.append({
                     "role": "assistant",
                     "content": [{"type": "output_text", "text": content}],
+                    "status": "completed",
                 })
     return items
 
