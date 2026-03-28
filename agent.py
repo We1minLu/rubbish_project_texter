@@ -14,7 +14,7 @@ from rich.markdown import Markdown
 
 import config
 from context_manager import ContextManager
-from doc_readers import list_projects, list_files, read_docx, read_excel, search_in_file
+from doc_readers import list_projects, list_files, read_docx, read_excel, search_in_file, read_image, read_pdf, read_pptx, read_project_folder
 from doc_writers import modify_docx_paragraph, modify_excel_cell, normalize_docx_style, set_docx_font_style, restructure_docx_paragraphs
 
 console = Console()
@@ -93,6 +93,90 @@ TOOLS = [
                 "keyword": {"type": "string", "description": "搜索关键词"},
             },
             "required": ["project_name", "filename", "keyword"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "read_image",
+        "description": "读取图片文件（PNG/JPG/JPEG/BMP/WEBP/GIF），调用视觉AI描述或回答图片相关问题",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "图片文件名，如 设计图.png"},
+                "question": {
+                    "type": "string",
+                    "description": "对图片的提问，留空则描述全部内容",
+                    "default": "",
+                },
+            },
+            "required": ["project_name", "filename"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "read_pdf",
+        "description": "读取 PDF 文件的文字内容，支持指定页码范围",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "PDF 文件名，如 方案.pdf"},
+                "page_range": {
+                    "type": "string",
+                    "description": "页码范围，如 '1-5' 或 '1,3,5'，留空读全部",
+                    "default": "",
+                },
+            },
+            "required": ["project_name", "filename"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "read_pptx",
+        "description": "读取 PPT/PPTX 演示文稿的文字内容，支持指定幻灯片范围",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "PPT/PPTX 文件名"},
+                "slide_range": {
+                    "type": "string",
+                    "description": "幻灯片范围，如 '1-10'，留空读全部",
+                    "default": "",
+                },
+            },
+            "required": ["project_name", "filename"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "read_project_folder",
+        "description": (
+            "批量读取项目文件夹下所有文件（docx/pdf/pptx/图片等），整体理解一个项目。"
+            "图片会自动调用视觉AI生成描述。适合用户说'帮我了解整个xxx项目'时使用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "subfolder": {
+                    "type": "string",
+                    "description": "子文件夹路径，留空则读项目根目录",
+                    "default": "",
+                },
+                "include_images": {
+                    "type": "boolean",
+                    "description": "是否包含图片文件（会调用视觉AI，速度较慢）",
+                    "default": True,
+                },
+                "max_files": {
+                    "type": "integer",
+                    "description": "最多读取文件数，避免超出token限制，默认20",
+                    "default": 20,
+                },
+            },
+            "required": ["project_name"],
         },
     },
     {
@@ -233,6 +317,21 @@ TOOL_MAP = {
     ),
     "search_in_file": lambda args: search_in_file(
         args["project_name"], args["filename"], args["keyword"]
+    ),
+    "read_image": lambda args: read_image(
+        args["project_name"], args["filename"], args.get("question", "")
+    ),
+    "read_pdf": lambda args: read_pdf(
+        args["project_name"], args["filename"], args.get("page_range", "")
+    ),
+    "read_pptx": lambda args: read_pptx(
+        args["project_name"], args["filename"], args.get("slide_range", "")
+    ),
+    "read_project_folder": lambda args: read_project_folder(
+        args["project_name"],
+        args.get("subfolder", ""),
+        args.get("include_images", True),
+        int(args.get("max_files", 20)),
     ),
     "modify_docx_paragraph": lambda args: modify_docx_paragraph(
         args["project_name"],

@@ -25,6 +25,7 @@ API_KEY = os.environ.get("ARK_API_KEY", "")
 BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 MODEL_DEFAULT = os.environ.get("ARK_MODEL_DEFAULT", "")
 MODEL_LARGE   = os.environ.get("ARK_MODEL_LARGE", MODEL_DEFAULT)
+IMAGE_MODEL   = os.environ.get("ARK_IMAGE_MODEL", MODEL_DEFAULT)
 LARGE_FILE_THRESHOLD_MB = 5
 
 TEMPERATURE = 0.3
@@ -40,10 +41,12 @@ MAX_CONTEXT_TOKENS = 30_000  # rough token budget for history trimming
 SYSTEM_PROMPT = """你是一个专业的中文文书智能助手，负责帮助用户管理和分析存放在 projects/ 目录下的项目文档（.docx/.xlsx/.xls）。
 
 ## 能力
-- 列出项目和文件
-- 读取、分析、总结文档内容
+- 列出项目和文件（支持 docx/xlsx/xls/pdf/pptx/图片等）
+- 读取、分析、总结文档内容（docx/pdf/pptx）
+- 读取图片文件（PNG/JPG等），调用视觉AI理解图片内容
+- 批量读取整个项目文件夹，整体理解项目
 - 在文档中搜索关键词
-- 修改文档段落和单元格（修改前自动备份）
+- 修改文档段落和单元格
 
 ## 大文档处理流程
 当文档包含多个分块（total_chunks > 1）时，你必须：
