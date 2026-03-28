@@ -20,136 +20,122 @@ from doc_writers import modify_docx_paragraph, modify_excel_cell
 console = Console()
 
 # ---------------------------------------------------------------------------
-# 工具注册表
+# 工具注册表（Responses API 格式：name/description/parameters 不嵌套在 function 下）
 # ---------------------------------------------------------------------------
 
 TOOLS = [
     {
         "type": "function",
-        "function": {
-            "name": "list_projects",
-            "description": "列出 projects/ 目录下所有项目文件夹",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+        "name": "list_projects",
+        "description": "列出 projects/ 目录下所有项目文件夹",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "type": "function",
+        "name": "list_files",
+        "description": "列出指定项目内的 docx/xlsx/xls 文件及大小",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+            },
+            "required": ["project_name"],
         },
     },
     {
         "type": "function",
-        "function": {
-            "name": "list_files",
-            "description": "列出指定项目内的 docx/xlsx/xls 文件及大小",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string", "description": "项目文件夹名称"},
+        "name": "read_docx",
+        "description": (
+            "分块读取 docx 文档，返回带段落编号的文本。"
+            "当 total_chunks > 1 时，需依次调用 chunk_index 0 到 total_chunks-1 读取全部内容。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "文件名，如 报告.docx"},
+                "chunk_index": {
+                    "type": "integer",
+                    "description": "分块索引，从 0 开始",
+                    "default": 0,
                 },
-                "required": ["project_name"],
             },
+            "required": ["project_name", "filename"],
         },
     },
     {
         "type": "function",
-        "function": {
-            "name": "read_docx",
-            "description": (
-                "分块读取 docx 文档，返回带段落编号的文本。"
-                "当 total_chunks > 1 时，需依次调用 chunk_index 0 到 total_chunks-1 读取全部内容。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string", "description": "项目文件夹名称"},
-                    "filename": {"type": "string", "description": "文件名，如 报告.docx"},
-                    "chunk_index": {
-                        "type": "integer",
-                        "description": "分块索引，从 0 开始",
-                        "default": 0,
-                    },
+        "name": "read_excel",
+        "description": "读取 xlsx 或 xls 文件的 Sheet 内容",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "文件名"},
+                "sheet_name": {
+                    "type": "string",
+                    "description": "Sheet 名称，留空则读取所有 Sheet",
+                    "default": "",
                 },
-                "required": ["project_name", "filename"],
             },
+            "required": ["project_name", "filename"],
         },
     },
     {
         "type": "function",
-        "function": {
-            "name": "read_excel",
-            "description": "读取 xlsx 或 xls 文件的 Sheet 内容",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string", "description": "项目文件夹名称"},
-                    "filename": {"type": "string", "description": "文件名"},
-                    "sheet_name": {
-                        "type": "string",
-                        "description": "Sheet 名称，留空则读取所有 Sheet",
-                        "default": "",
-                    },
-                },
-                "required": ["project_name", "filename"],
+        "name": "search_in_file",
+        "description": "在 docx/xlsx/xls 文件中搜索关键词，返回匹配的段落或单元格",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "文件名"},
+                "keyword": {"type": "string", "description": "搜索关键词"},
             },
+            "required": ["project_name", "filename", "keyword"],
         },
     },
     {
         "type": "function",
-        "function": {
-            "name": "search_in_file",
-            "description": "在 docx/xlsx/xls 文件中搜索关键词，返回匹配的段落或单元格",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string", "description": "项目文件夹名称"},
-                    "filename": {"type": "string", "description": "文件名"},
-                    "keyword": {"type": "string", "description": "搜索关键词"},
+        "name": "modify_docx_paragraph",
+        "description": "修改 docx 文档中指定段落的文本内容，保留原有格式，修改前自动备份",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "文件名"},
+                "paragraph_index": {
+                    "type": "integer",
+                    "description": "段落索引（read_docx 返回的编号）",
                 },
-                "required": ["project_name", "filename", "keyword"],
+                "new_text": {"type": "string", "description": "新的段落文本"},
             },
+            "required": ["project_name", "filename", "paragraph_index", "new_text"],
         },
     },
     {
         "type": "function",
-        "function": {
-            "name": "modify_docx_paragraph",
-            "description": "修改 docx 文档中指定段落的文本内容，保留原有格式，修改前自动备份",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string", "description": "项目文件夹名称"},
-                    "filename": {"type": "string", "description": "文件名"},
-                    "paragraph_index": {
-                        "type": "integer",
-                        "description": "段落索引（read_docx 返回的编号）",
-                    },
-                    "new_text": {"type": "string", "description": "新的段落文本"},
+        "name": "modify_excel_cell",
+        "description": "修改 xlsx 文件中指定单元格的值，修改前自动备份。注意：.xls 格式只读。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project_name": {"type": "string", "description": "项目文件夹名称"},
+                "filename": {"type": "string", "description": "xlsx 文件名"},
+                "sheet_name": {"type": "string", "description": "Sheet 名称"},
+                "cell_address": {
+                    "type": "string",
+                    "description": "单元格地址，如 B3",
                 },
-                "required": ["project_name", "filename", "paragraph_index", "new_text"],
+                "new_value": {"type": "string", "description": "新的单元格值"},
             },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "modify_excel_cell",
-            "description": "修改 xlsx 文件中指定单元格的值，修改前自动备份。注意：.xls 格式只读。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "project_name": {"type": "string", "description": "项目文件夹名称"},
-                    "filename": {"type": "string", "description": "xlsx 文件名"},
-                    "sheet_name": {"type": "string", "description": "Sheet 名称"},
-                    "cell_address": {
-                        "type": "string",
-                        "description": "单元格地址，如 B3",
-                    },
-                    "new_value": {"type": "string", "description": "新的单元格值"},
-                },
-                "required": [
-                    "project_name",
-                    "filename",
-                    "sheet_name",
-                    "cell_address",
-                    "new_value",
-                ],
-            },
+            "required": [
+                "project_name",
+                "filename",
+                "sheet_name",
+                "cell_address",
+                "new_value",
+            ],
         },
     },
 ]
@@ -204,13 +190,42 @@ def dispatch_tool(name: str, arguments: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 历史转换：内部存储 → Responses API input 格式
+# ---------------------------------------------------------------------------
+
+def _build_input(history: list) -> list:
+    """将对话历史转换为 Responses API 的 input 列表。"""
+    items = []
+    for entry in history:
+        entry_type = entry.get("type")
+        role = entry.get("role")
+
+        if entry_type in ("function_call", "function_call_output"):
+            # 直接透传这两种类型
+            items.append(entry)
+        elif role == "user":
+            content = entry.get("content", "")
+            items.append({
+                "role": "user",
+                "content": [{"type": "input_text", "text": content}],
+            })
+        elif role == "assistant":
+            content = entry.get("content", "")
+            if content:
+                items.append({
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": content}],
+                })
+    return items
+
+
+# ---------------------------------------------------------------------------
 # 模型选择
 # ---------------------------------------------------------------------------
 
 def _pick_model(history: list) -> str:
-    """根据历史消息总长度选择模型。"""
-    total = sum(len(str(m.get("content", ""))) for m in history)
-    # 粗略：5MB 以上内容走 128k 模型
+    total = sum(len(str(e.get("content", "") or e.get("output", "") or e.get("arguments", "")))
+                for e in history)
     if total > config.LARGE_FILE_THRESHOLD_MB * 1024 * 1024:
         return config.MODEL_LARGE
     return config.MODEL_DEFAULT
@@ -256,15 +271,14 @@ def chat_loop() -> None:
         while True:
             history = ctx.get_history()
             model = _pick_model(history)
+            input_items = _build_input(history)
 
             with console.status("[dim]思考中...[/dim]", spinner="dots"):
                 try:
-                    response = client.chat.completions.create(
+                    response = client.responses.create(
                         model=model,
-                        messages=[
-                            {"role": "system", "content": config.SYSTEM_PROMPT},
-                            *history,
-                        ],
+                        instructions=config.SYSTEM_PROMPT,
+                        input=input_items,
                         tools=TOOLS,
                         temperature=config.TEMPERATURE,
                     )
@@ -273,37 +287,43 @@ def chat_loop() -> None:
                     ctx._history.pop()  # 移除刚才加入的 user 消息
                     break
 
-            msg = response.choices[0].message
+            # 解析输出
+            has_tool_calls = False
+            reply_text = ""
 
-            # 有工具调用
-            if msg.tool_calls:
-                # 把 assistant 消息（含 tool_calls）加入历史
-                ctx.add(msg.model_dump(exclude_unset=False))
+            for item in response.output:
+                if item.type == "function_call":
+                    has_tool_calls = True
+                    console.print(f"[dim]  调用工具: {item.name}[/dim]")
+                    result = dispatch_tool(item.name, item.arguments)
 
-                tool_results = []
-                for tc in msg.tool_calls:
-                    fn_name = tc.function.name
-                    console.print(f"[dim]  调用工具: {fn_name}[/dim]")
-                    result = dispatch_tool(fn_name, tc.function.arguments)
-                    tool_results.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": result,
-                        }
-                    )
+                    # 存入历史：function_call + function_call_output
+                    ctx.add({
+                        "type": "function_call",
+                        "id": item.id,
+                        "call_id": item.call_id,
+                        "name": item.name,
+                        "arguments": item.arguments,
+                    })
+                    ctx.add({
+                        "type": "function_call_output",
+                        "call_id": item.call_id,
+                        "output": result,
+                    })
 
-                for tr in tool_results:
-                    ctx.add(tr)
+                elif item.type == "message":
+                    for part in item.content:
+                        if hasattr(part, "text"):
+                            reply_text += part.text
 
-                # 继续循环，让 LLM 处理工具结果
+            if has_tool_calls:
+                # 继续循环，让模型处理工具结果
                 continue
 
-            # 无工具调用：最终回复
-            reply = msg.content or ""
-            ctx.add({"role": "assistant", "content": reply})
+            # 最终回复
+            ctx.add({"role": "assistant", "content": reply_text})
             console.print()
-            console.print(Panel(Markdown(reply), title="[bold blue]助手[/bold blue]"))
+            console.print(Panel(Markdown(reply_text), title="[bold blue]助手[/bold blue]"))
             console.print()
             break
 

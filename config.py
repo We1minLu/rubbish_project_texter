@@ -23,7 +23,6 @@ PROJECTS_DIR = BASE_DIR / "projects"
 # --- Doubao API ---
 API_KEY = os.environ.get("ARK_API_KEY", "")
 BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
-# 使用火山引擎控制台「推理接入点」中的 endpoint ID，格式：ep-xxxxxxxx-xxxxx
 MODEL_DEFAULT = os.environ.get("ARK_MODEL_DEFAULT", "")
 MODEL_LARGE   = os.environ.get("ARK_MODEL_LARGE", MODEL_DEFAULT)
 LARGE_FILE_THRESHOLD_MB = 5
